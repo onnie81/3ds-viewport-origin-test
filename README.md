@@ -43,6 +43,10 @@ Switch between A and B with X at the same scroll position.
 
 Nintendo 3DS XL (SPR-001): mode A shows the picture and matches mode B. A negative origin works on hardware.
 
+| Mode A | Mode B |
+|---|---|
+| ![Mode A on the console](console/mode_a.jpg) | ![Mode B on the console](console/mode_b.jpg) |
+
 Release the D-pad before taking a screenshot: while scrolling, the numbers on the bottom screen can be a few frames away from the picture.
 
 ## Building
