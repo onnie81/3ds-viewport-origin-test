@@ -1,9 +1,10 @@
-// Viewport origin tests for GPUREG_VIEWPORT_XY. L and R pick one of three:
+// Viewport origin tests for GPUREG_VIEWPORT_XY. D-pad left and right pick one of three:
 //  1  A negative origin: an 800x480 picture scrolled behind the top screen by moving the viewport origin.
 //  2  A position past 511: a picture drawn at 512,768 in a 1024x1024 buffer.
 //  3  Straddling the 1024 edge: the same picture at 960,960, which only fits if the origin wraps.
-// Mode A uses the origin under test. Mode B draws the same thing with the viewport at 0,0 and the
-// projection shifted, as the reference. X switches between them. Every test starts in mode A.
+// Mode A uses the origin under test. Mode B draws the same thing with the viewport at 0,0, as the
+// reference. X switches between them. Every test starts in mode A.
+// L, SELECT and the rest of the D-pad do nothing, so a screenshot shortcut does not disturb a test.
 
 #include <3ds.h>
 #include <citro3d.h>
@@ -27,11 +28,15 @@
 
 #define BUF 1024 // the off-screen buffer, square
 #define PIC 128  // the picture drawn into it, square
+#define POS_X    512 // where test 2 draws it
+#define POS_Y    768
+#define STRADDLE 960 // where test 3 draws it, on both axes
 
 #define WORLD_VERTS  (COLS * ROWS * 12)
 #define TARGET_VERTS 12
 #define HUD_VERTS    24
 #define PIC_VERTS    (16 * 12 + 24 + 3)
+#define REF3_MAX     (PIC_VERTS * 4)
 #define VIEW2_VERTS  12
 #define VIEW3_VERTS  30
 #define FRAME_VERTS  30
@@ -42,7 +47,9 @@ enum
 	V_TARGET = V_WORLD + WORLD_VERTS,
 	V_HUD    = V_TARGET + TARGET_VERTS,
 	V_PIC    = V_HUD + HUD_VERTS,
-	V_VIEW2  = V_PIC + PIC_VERTS,
+	V_REF2   = V_PIC + PIC_VERTS,
+	V_REF3   = V_REF2 + PIC_VERTS,
+	V_VIEW2  = V_REF3 + REF3_MAX,
 	V_VIEW3  = V_VIEW2 + VIEW2_VERTS,
 	V_FRAME  = V_VIEW3 + VIEW3_VERTS,
 	TOTAL_VERTS = V_FRAME + FRAME_VERTS,
@@ -60,6 +67,7 @@ static C3D_Tex bufTex;
 static C3D_RenderTarget* top;
 static C3D_RenderTarget* bufTarget;
 static bool haveBuffer;
+static int ref3Verts;
 
 static vertex* quad(vertex* v, float x0, float y0, float x1, float y1, float r, float g, float b)
 {
@@ -128,11 +136,24 @@ static void buildHud(void)
 	quad(v, cx - 1, cy + 10, cx + 1, cy + 26, 1, 1, 1);
 }
 
-// The 128x128 picture for the buffer: 16 cells, a white border and a white corner mark at the top left,
-// so a quarter of it, or a flipped copy, cannot be mistaken for the whole.
-static void buildPicture(void)
+// A rectangle of the picture, moved by ox,oy and cut to the buffer. The far edges stop a quarter of a
+// pixel short of 1024: a console drops a triangle that touches the far edge of a 1024 viewport.
+static vertex* piece(vertex* v, float x0, float y0, float x1, float y1, float r, float g, float b, float ox, float oy)
 {
-	vertex* v = vbo + V_PIC;
+	const float edge = BUF - 0.25f;
+	x0 += ox; x1 += ox; y0 += oy; y1 += oy;
+	if (x0 < 0) x0 = 0;
+	if (y0 < 0) y0 = 0;
+	if (x1 > edge) x1 = edge;
+	if (y1 > edge) y1 = edge;
+	if (x0 >= x1 || y0 >= y1) return v;
+	return quad(v, x0, y0, x1, y1, r, g, b);
+}
+
+// The 128x128 picture: 16 cells, a white border and a white corner mark at the top left, so a quarter
+// of it, or a flipped copy, cannot be mistaken for the whole.
+static vertex* picture(vertex* v, float ox, float oy)
+{
 	for (int row = 0; row < 4; row++)
 	{
 		for (int col = 0; col < 4; col++)
@@ -142,17 +163,36 @@ static void buildPicture(void)
 			const float g = shade * (0.2f + 0.8f * row / 3);
 			const float b = shade * (1.0f - 0.8f * col / 3);
 			const float x = col * 32, y = row * 32;
-			v = quad(v, x, y, x + 32, y + 32, r, g, b);
-			v = quad(v, x + 10, y + 10, x + 22, y + 22, 1.0f - r, 1.0f - g, 1.0f - b);
+			v = piece(v, x, y, x + 32, y + 32, r, g, b, ox, oy);
+			v = piece(v, x + 10, y + 10, x + 22, y + 22, 1.0f - r, 1.0f - g, 1.0f - b, ox, oy);
 		}
 	}
-	v = quad(v, 0, 0, PIC, 2, 1, 1, 1);
-	v = quad(v, 0, PIC - 2, PIC, PIC, 1, 1, 1);
-	v = quad(v, 0, 0, 2, PIC, 1, 1, 1);
-	v = quad(v, PIC - 2, 0, PIC, PIC, 1, 1, 1);
-	*v++ = (vertex){ 6, PIC - 6, 0.5f, 1, 1, 1, 1, 0, 0 };
-	*v++ = (vertex){ 30, PIC - 6, 0.5f, 1, 1, 1, 1, 0, 0 };
-	*v++ = (vertex){ 6, PIC - 30, 0.5f, 1, 1, 1, 1, 0, 0 };
+	v = piece(v, 0, 0, PIC, 2, 1, 1, 1, ox, oy);
+	v = piece(v, 0, PIC - 2, PIC, PIC, 1, 1, 1, ox, oy);
+	v = piece(v, 0, 0, 2, PIC, 1, 1, 1, ox, oy);
+	v = piece(v, PIC - 2, 0, PIC, PIC, 1, 1, 1, ox, oy);
+
+	const float mx = ox + 6, my = oy + PIC - 6;
+	if (mx >= 0 && mx + 24 <= BUF && my - 24 >= 0 && my <= BUF)
+	{
+		*v++ = (vertex){ mx, my, 0.5f, 1, 1, 1, 1, 0, 0 };
+		*v++ = (vertex){ mx + 24, my, 0.5f, 1, 1, 1, 1, 0, 0 };
+		*v++ = (vertex){ mx, my - 24, 0.5f, 1, 1, 1, 1, 0, 0 };
+	}
+	return v;
+}
+
+// Mode A draws the picture through its viewport. The references hold it where it must land in the
+// buffer: once for test 2, and for test 3 once per corner, each copy cut to the buffer.
+static void buildPictures(void)
+{
+	picture(vbo + V_PIC, 0, 0);
+	picture(vbo + V_REF2, POS_X, POS_Y);
+
+	vertex* v = vbo + V_REF3;
+	for (int i = 0; i < 4; i++)
+		v = picture(v, STRADDLE - ((i & 1) ? BUF : 0), STRADDLE - ((i & 2) ? BUF : 0));
+	ref3Verts = v - (vbo + V_REF3);
 }
 
 // What the top screen shows of the buffer: all of it on the left, the picture's place at 1:1 on the right.
@@ -162,7 +202,7 @@ static void buildViews(void)
 
 	vertex* v = vbo + V_VIEW2;
 	v = view(v, 0, 0, 240, 240, 0, 0, BUF, BUF);
-	view(v, x, y, x + PIC, y + PIC, 512, 768, 512 + PIC, 768 + PIC);
+	view(v, x, y, x + PIC, y + PIC, POS_X, POS_Y, POS_X + PIC, POS_Y + PIC);
 
 	// At 960,960 the picture's four quarters wrap into the four corners of the buffer.
 	v = vbo + V_VIEW3;
@@ -219,7 +259,7 @@ static void sceneInit(void)
 	vbo = linearAlloc(sizeof(vertex) * TOTAL_VERTS);
 	buildWorld();
 	buildHud();
-	buildPicture();
+	buildPictures();
 	buildViews();
 
 	C3D_BufInfo* bufInfo = C3D_GetBufInfo();
@@ -257,7 +297,7 @@ static void staticText(int test)
 		printf("\x1b[16;1Hif a negative viewport origin works.");
 		printf("\x1b[17;1HIn B the viewport is 240x400 at 0,0 and");
 		printf("\x1b[18;1Hthe projection is shifted instead.");
-		printf("\x1b[21;1HD-pad or circle pad: scroll");
+		printf("\x1b[21;1HCircle pad: scroll");
 		printf("\x1b[22;1HX: mode A/B   Y: auto/manual");
 	}
 	else if (test == TEST_POSITION)
@@ -268,8 +308,8 @@ static void staticText(int test)
 		printf("\x1b[13;1HLeft: the whole buffer.");
 		printf("\x1b[14;1HRight: where the picture belongs, 1:1.");
 		printf("\x1b[16;1HA must match B on a console.");
-		printf("\x1b[17;1HIn B the viewport is the whole buffer,");
-		printf("\x1b[18;1Hat 0,0, and the projection is shifted.");
+		printf("\x1b[17;1HIn B the viewport is the whole buffer");
+		printf("\x1b[18;1Hat 0,0 and the vertices are moved.");
 		printf("\x1b[22;1HX: mode A/B   Y: scissor");
 	}
 	else
@@ -287,7 +327,7 @@ static void staticText(int test)
 	}
 	if (test != TEST_NEGATIVE && !haveBuffer)
 		printf("\x1b[20;1HNo memory for the 1024x1024 buffer.");
-	printf("\x1b[23;1HL/R: test    START: exit");
+	printf("\x1b[23;1HD-pad left/right: test   START: exit");
 }
 
 // Test 1. The scroll is the picture coordinate of the screen's lower left corner. It starts where the
@@ -308,7 +348,7 @@ static void frameNegative(bool originScroll, u32 kDown, u32 kHeld)
 		newTarget = false;
 	}
 
-	if (kHeld & (KEY_LEFT | KEY_RIGHT | KEY_UP | KEY_DOWN)) automatic = false;
+	if (kHeld & (KEY_CPAD_LEFT | KEY_CPAD_RIGHT | KEY_CPAD_UP | KEY_CPAD_DOWN)) automatic = false;
 	if (automatic)
 	{
 		sx = step(sx, tx - SCREEN_W / 2, 2);
@@ -316,10 +356,10 @@ static void frameNegative(bool originScroll, u32 kDown, u32 kHeld)
 	}
 	else
 	{
-		if (kHeld & KEY_LEFT)  sx -= 3;
-		if (kHeld & KEY_RIGHT) sx += 3;
-		if (kHeld & KEY_DOWN)  sy -= 3;
-		if (kHeld & KEY_UP)    sy += 3;
+		if (kHeld & KEY_CPAD_LEFT)  sx -= 3;
+		if (kHeld & KEY_CPAD_RIGHT) sx += 3;
+		if (kHeld & KEY_CPAD_DOWN)  sy -= 3;
+		if (kHeld & KEY_CPAD_UP)    sy += 3;
 	}
 	if (sx < 0) sx = 0;
 	if (sx > WORLD_W - SCREEN_W) sx = WORLD_W - SCREEN_W;
@@ -381,9 +421,9 @@ static void frameNegative(bool originScroll, u32 kDown, u32 kHeld)
 // Tests 2 and 3. The picture goes into the buffer, then the top screen shows the buffer.
 static void frameBuffer(int test, bool atOrigin, bool scissor)
 {
-	const int origin[2] = { test == TEST_POSITION ? 512 : 960, test == TEST_POSITION ? 768 : 960 };
+	const int origin[2] = { test == TEST_POSITION ? POS_X : STRADDLE, test == TEST_POSITION ? POS_Y : STRADDLE };
 
-	printf("\x1b[8;1Hmode   %s", atOrigin ? "A  viewport at the position" : "B  projection shifted      ");
+	printf("\x1b[8;1Hmode   %s", atOrigin ? "A  viewport at the position" : "B  vertices at the position");
 	if (atOrigin)
 	{
 		printf("\x1b[9;1Hviewport  128x128 at x=%-4d y=%-4d  ", origin[0], origin[1]);
@@ -412,16 +452,11 @@ static void frameBuffer(int test, bool atOrigin, bool scissor)
 		}
 		else
 		{
-			// The reference: the same pixels with no origin involved. Straddling takes one draw per corner.
-			const int copies = test == TEST_POSITION ? 1 : 4;
-			for (int i = 0; i < copies; i++)
-			{
-				const int px = origin[0] - ((i & 1) ? BUF : 0), py = origin[1] - ((i & 2) ? BUF : 0);
-				Mtx_Ortho(&projection, -px, BUF - px, -py, BUF - py, 0, 1, true);
-				C3D_SetViewport(0, 0, BUF, BUF);
-				if (scissor) C3D_SetScissor(GPU_SCISSOR_NORMAL, 0, 0, BUF, BUF);
-				draw(&projection, V_PIC, PIC_VERTS);
-			}
+			Mtx_Ortho(&projection, 0, BUF, 0, BUF, 0, 1, true);
+			C3D_SetViewport(0, 0, BUF, BUF);
+			if (scissor) C3D_SetScissor(GPU_SCISSOR_NORMAL, 0, 0, BUF, BUF);
+			if (test == TEST_POSITION) draw(&projection, V_REF2, PIC_VERTS);
+			else draw(&projection, V_REF3, ref3Verts);
 		}
 
 		C3D_FrameDrawOn(top);
@@ -473,9 +508,9 @@ int main()
 		const u32 kDown = hidKeysDown(), kHeld = hidKeysHeld();
 		if (kDown & KEY_START) break;
 		if (kDown & KEY_X) modeA = !modeA;
-		if (kDown & (KEY_L | KEY_R))
+		if (kDown & (KEY_DLEFT | KEY_DRIGHT))
 		{
-			test = (test + ((kDown & KEY_R) ? 1 : TEST_COUNT - 1)) % TEST_COUNT;
+			test = (test + ((kDown & KEY_DRIGHT) ? 1 : TEST_COUNT - 1)) % TEST_COUNT;
 			modeA = true;
 			scissor = false;
 			staticText(test);
