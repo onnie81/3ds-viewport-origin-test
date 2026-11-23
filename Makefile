@@ -33,7 +33,7 @@ include $(DEVKITARM)/3ds_rules
 #---------------------------------------------------------------------------------
 TARGET		:=	$(notdir $(CURDIR))
 APP_TITLE	:=	Viewport origin test
-APP_DESCRIPTION	:=	Scrolls a picture with the viewport origin
+APP_DESCRIPTION := Three tests of the viewport origin
 APP_AUTHOR	:=	onnie81
 BUILD		:=	build
 SOURCES		:=	source

@@ -1,4 +1,4 @@
-; Position through one matrix, colour passed on.
+; Position through one matrix, colour and texture coordinate passed on.
 
 .fvec projection[4]
 
@@ -7,9 +7,11 @@
 
 .out outpos position
 .out outclr color
+.out outtc0 texcoord0
 
 .alias inpos v0
 .alias inclr v1
+.alias intc0 v2
 
 .proc main
 	mov r0.xyz, inpos
@@ -21,5 +23,6 @@
 	dp4 outpos.w, projection[3], r0
 
 	mov outclr, inclr
+	mov outtc0, intc0
 	end
 .end
