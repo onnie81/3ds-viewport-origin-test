@@ -39,7 +39,11 @@ Switch between A and B with X at the same scroll position.
 
 ![Mode B and mode A on three Azahar builds](azahar.png)
 
-Not run on a console yet.
+## On a console
+
+Nintendo 3DS XL (SPR-001): mode A shows the picture and matches mode B. A negative origin works on hardware.
+
+Release the D-pad before taking a screenshot: the two screens are not captured at the same moment, so while scrolling the numbers on the bottom screen run a few frames apart from the picture.
 
 ## Building
 
